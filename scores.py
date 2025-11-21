@@ -246,7 +246,7 @@ class BandScorer(object):
     self.dx = self.box_width/self._nbins
     self.dy = self.box_height/self._nbins
 
-  def comput_band_score(self, rate):
+  def compute_band_score(self, rate):
     """
     Compute the band score for a given rate map.
     This function calculates the band score, which is a measure of the spatial 
@@ -319,7 +319,7 @@ class BandScorer(object):
     return score, params, fft_rate, gx, k, phi, sigma
 
 
-  def comput_orientation(self, heatmap, plot=False):
+  def compute_orientation(self, heatmap, plot=False):
     # Compute the Fourier transform
     fft_result = np.fft.fftshift(np.fft.fft2(heatmap))
     power_spectrum = np.abs(fft_result) ** 2
@@ -361,41 +361,67 @@ class BandScorer(object):
       plt.show()
 
     return 180 - avg_orientation * (180 / np.pi)
+  
 
+  def compute_phases(self, L, theta, rates):
+      """
+      Compute the phases of band cells given their parameters and rate maps.
+      Args:
+        L : spacing for the band cell.
+        theta : orientation angle (in radians) for the band cell.
+        rates : the rate map of a band cell.
+      Returns:
+        numpy.ndarray: computed phase for a band cell.
+      """    
+      # "loc" here is different from what we use in "compute_band_score", it's the real physical location
+      X, Y = np.meshgrid(np.linspace(-self.box_width/2, self.box_width/2, self._nbins), np.linspace(-self.box_height/2, self.box_height/2, self._nbins))
+      x_flat, y_flat = X.flatten(), Y.flatten()
+      loc = np.stack([x_flat, y_flat])
 
-
-  def direction_score(self, activations_theta):
-      Ng = activations_theta.shape[0]
-      scores = []
-      A_params = []
-      mu_params = []
-      sigma_params = []
-      theta = np.linspace(-np.pi, np.pi, activations_theta.shape[1])
+      # Project rate map along theta to calculate phi
+      direction_vec = np.array([np.cos(theta), np.sin(theta)])
+      phi = np.dot(direction_vec, loc)
       
-      def gaussian(x, A, mu, sigma):
-        dis = np.where(np.abs(x-mu) < np.pi, np.abs(x-mu), np.pi*2-np.abs(x-mu))
-        return A * np.exp(-dis**2 / (2 * sigma**2))
+      # Compute phase by taking modulo with spacing L
+      loc_phase = np.mod(phi, L) / L * 2 * np.pi - np.pi  # Normalize to [-¦Ð, ¦Ð]
+      phase = np.angle(np.sum(np.exp(loc_phase * 1j) * rates) / np.sum(rates))
 
-      for i in range(Ng):
-          y_data = activations_theta[i]
-          
-          # Fit the Gaussian function to the data
-          try:
-              popt, _ = curve_fit(gaussian, theta, y_data, p0=[1, 0, 1])
-              fitted_curve = gaussian(theta, *popt)
+      return phase
 
-              # Calculate cosine similarity
-              cos_sim = np.dot(y_data, fitted_curve) / (np.linalg.norm(y_data) * np.linalg.norm(fitted_curve))
-              scores.append(cos_sim)
-              
-              # Save the parameters
-              A_params.append(popt[0])
-              mu_params.append(popt[1])
-              sigma_params.append(popt[2])
-          except RuntimeError:
-              scores.append(0)
-              A_params.append(0)
-              mu_params.append(0)
-              sigma_params.append(0)
-      
-      return np.array(scores), np.array(A_params), np.array(mu_params), np.array(sigma_params)
+
+
+def direction_score(activations_theta):
+    Ng = activations_theta.shape[0]
+    scores = []
+    A_params = []
+    mu_params = []
+    sigma_params = []
+    theta = np.linspace(-np.pi, np.pi, activations_theta.shape[1])
+    
+    def gaussian(x, A, mu, sigma):
+      dis = np.where(np.abs(x-mu) < np.pi, np.abs(x-mu), np.pi*2-np.abs(x-mu))
+      return A * np.exp(-dis**2 / (2 * sigma**2))
+
+    for i in range(Ng):
+        y_data = activations_theta[i]
+        
+        # Fit the Gaussian function to the data
+        try:
+            popt, _ = curve_fit(gaussian, theta, y_data, p0=[1, 0, 1])
+            fitted_curve = gaussian(theta, *popt)
+
+            # Calculate cosine similarity
+            cos_sim = np.dot(y_data, fitted_curve) / (np.linalg.norm(y_data) * np.linalg.norm(fitted_curve))
+            scores.append(cos_sim)
+            
+            # Save the parameters
+            A_params.append(popt[0])
+            mu_params.append(popt[1])
+            sigma_params.append(popt[2])
+        except RuntimeError:
+            scores.append(0)
+            A_params.append(0)
+            mu_params.append(0)
+            sigma_params.append(0)
+    
+    return np.array(scores), np.array(A_params), np.array(mu_params), np.array(sigma_params)
